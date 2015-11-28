@@ -19,27 +19,14 @@ def docker_client(url='unix://var/run/docker.sock'):
 
 def build_image(docker_client, path, tag, nocache=False):
     """ Build docker image"""
-    lines = [line.popitem()[1] for line in docker_client.build(
-        path=path, rm=True, forcerm=True, tag=tag, decode=True,
-        nocache=nocache)]
     message = ''
-    error = ''
-    for l in lines:
-        if isinstance(l, dict):
-            error = ''.join(list(l.values()))
-            message += error
-        else:
-            message += l
-    if error:
-        raise exceptions.DbuildDockerBuildFailedException(
-            '''Docker build failed
-Error message: %s
-
-Full build messages
-
-%s''' % (error, message))
-    else:
-        return ''.join(lines)
+    errors = []
+    for line in docker_client.build(path=path, rm=True, forcerm=True,
+                                    tag=tag, decode=True, nocache=nocache):
+        if 'stream' in line:
+            yield line['stream']
+        if 'error' in line:
+            raise exceptions.DbuildDockerBuildFailedException(line['error'], line.get['errorDetails'])
 
 
 def create_container(docker_client, image, name=None, command=None, env=None,
@@ -73,9 +60,9 @@ def wait_container(docker_client, container):
 
 def container_logs(docker_client, container):
     """ Get container stdout and stderr """
-    return [log.strip() for log in docker_client.logs(container=container,
-                                                      stream=True,
-                                                      timestamps=True)]
+    for log in docker_client.logs(container=container, stream=True,
+                                     timestamps=True):
+        yield log.strip()
 
 
 def remove_container(docker_client, container, force=False):
@@ -169,24 +156,21 @@ def docker_build(build_dir, build_type, source_dir='source', force_rm=False,
     try:
         create_dockerfile(dist, release, docker_path)
         image_tag = 'dbuild-' + dist + '/' + release
-        response = build_image(c, docker_path, tag=image_tag,
-                               nocache=not build_cache)
-    except Exception as e:
-        raise exceptions.DbuildBuildFailedException(
-            'docker image build failed %s' % e.args)
+        for l in build_image(c, docker_path, tag=image_tag, nocache=not build_cache):
+            print(l)
     finally:
         shutil.rmtree(docker_path)
-
-    print(response)
 
     container = create_container(c, image_tag, cwd=cwd,
                                  command=['bash', '-c', command],
                                  shared_volumes={build_dir: '/build'})
     print(container)
     response = start_container(c, container)
+
+    for l in container_logs(c, container):
+        print(l.decode('utf-8'))
+
     rv = wait_container(c, container)
-    logs = container_logs(c, container)
-    print('\n'.join([l.decode('utf-8') for l in logs]))
 
     if rv == 0:
         print('Build successful (build type: %s), removing container %s' % (
