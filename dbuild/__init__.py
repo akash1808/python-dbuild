@@ -81,7 +81,7 @@ def remove_container(docker_client, container, force=False):
     return docker_client.remove_container(container=container, force=force)
 
 
-def create_dockerfile(dist, release, docker_dir):
+def create_dockerfile(dist, release, docker_dir, use_proxy):
     """Create docker directory and populate it"""
     PATH = os.path.dirname(os.path.abspath(__file__))
     TMPL_ENV = Environment(
@@ -90,15 +90,24 @@ def create_dockerfile(dist, release, docker_dir):
         trim_blocks=False)
 
     dockerfile = os.path.join(docker_dir, 'Dockerfile')
-
-    ctxt = {'dist': dist, 'release': release,
-            'maintainer': 'dbuild, dbuild@test.com'}
+    if use_proxy:
+        HTTP_PROXY = os.getenv('http_proxy', "http://127.0.0.1:3128")
+        HTTPS_PROXY = os.getenv('https_proxy', "https://127.0.0.1:3128")
+        ctxt = {'dist': dist, 'release': release, 'http_proxy': HTTP_PROXY, 'https_proxy': HTTPS_PROXY,
+                'maintainer': 'dbuild, dbuild@test.com'}
 
     # Write Dockerfile under docker_dir
-    with open(dockerfile, 'w') as d:
-        dockerdata = TMPL_ENV.get_template('dockerfile.jinja').render(ctxt)
-        d.write(dockerdata)
+        with open(dockerfile, 'w') as d:
+            dockerdata = TMPL_ENV.get_template('dockerfile_proxy.jinja').render(ctxt)
+            d.write(dockerdata)
+    else:
+        ctxt = {'dist': dist, 'release': release,
+                'maintainer': 'dbuild, dbuild@test.com'}
 
+    # Write Dockerfile under docker_dir
+        with open(dockerfile, 'w') as d:
+            dockerdata = TMPL_ENV.get_template('dockerfile.jinja').render(ctxt)
+            d.write(dockerdata)
     # Copy scripts under docker_dir
     shutil.copytree(os.path.join(PATH, 'scripts'),
                     os.path.join(docker_dir, 'scripts'))
@@ -107,7 +116,7 @@ def create_dockerfile(dist, release, docker_dir):
 def docker_build(build_dir, build_type, source_dir='source', force_rm=False,
                  docker_url='unix://var/run/docker.sock', dist='ubuntu',
                  release='trusty', extra_repos_file='repos',
-                 extra_repo_keys_file='keys', build_cache=True,
+                 extra_repo_keys_file='keys', build_cache=True, use_proxy=False,
                  build_owner=None):
     """
     build_dir:  build directory, this directory will be mounted to /build in
@@ -126,6 +135,7 @@ def docker_build(build_dir, build_type, source_dir='source', force_rm=False,
     extra_repo_keys_file: a file which contain any apt keys required for extra
                           repos. It is a relative path from build_dir
     build_cache:    Whether to use docker build cache or not
+    use_proxy:      to be used behind proxy
     build_owner:    user id which will own all build files
     """
 
@@ -159,13 +169,12 @@ def docker_build(build_dir, build_type, source_dir='source', force_rm=False,
 
     c = docker_client(docker_url)
     print "Starting %s Package Build" % build_type
-
     # Create docker_dir - a temporary directory which will have Dockerfile and
     # scripts to build the container.
     docker_path = mkdtemp()
 
     try:
-        create_dockerfile(dist, release, docker_path)
+        create_dockerfile(dist, release, docker_path, use_proxy)
         image_tag = 'dbuild-' + dist + '/' + release
         response = build_image(c, docker_path, tag=image_tag,
                                nocache=not build_cache)
@@ -236,7 +245,8 @@ def main(argv=sys.argv):
                     all keys for any extra repos.')
     ap.add_argument('--build-cache', action='store_false', default=True,
                     help='Whether to use docker build cache or not')
-
+    ap.add_argument('--use-proxy', action='store_true', default=False,
+                    help='To support build behind proxy. Requires http_proxy and https_proxy to be set as environment variables')
     args = ap.parse_args()
 
     try:
@@ -246,7 +256,7 @@ def main(argv=sys.argv):
                      dist=args.dist, release=args.release,
                      extra_repos_file=args.extra_repos_file,
                      extra_repo_keys_file=args.extra_repo_keys_file,
-                     build_cache=args.build_cache)
+                     build_cache=args.build_cache,use_proxy=args.use_proxy)
     except exceptions.DbuildSourceBuildFailedException:
         print 'ERROR | Source build failed for build directory: %s' \
             % args.build_dir
@@ -259,7 +269,7 @@ def main(argv=sys.argv):
                      dist=args.dist, release=args.release,
                      extra_repos_file=args.extra_repos_file,
                      extra_repo_keys_file=args.extra_repo_keys_file,
-                     build_cache=args.build_cache)
+                     build_cache=args.build_cache,use_proxy=args.use_proxy)
     except exceptions.DbuildBinaryBuildFailedException:
         print 'ERROR | Binary build failed for build directory: %s' \
             % args.build_dir
