@@ -1,4 +1,7 @@
 FROM {{ dist }}:{{ release }}
 MAINTAINER {{ maintainer }}
+RUN echo 'http_proxy="{{ http_proxy }}"' >> /etc/environment
+RUN echo 'https_proxy="{{ https_proxy }}"' >> /etc/environment
+RUN echo 'Acquire::Http::Proxy "{{ http_proxy }}";' >> /etc/apt/apt.conf.d/90proxy
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y dpkg-dev aptitude build-essential ; mkdir -p /usr/lib/pbuilder/
 COPY scripts/pbuilder-satisfydepends* /usr/lib/pbuilder/
