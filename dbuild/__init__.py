@@ -136,7 +136,7 @@ def docker_build(build_dir, build_type, source_dir='source', force_rm=False,
         command += "dpkg-source -x /build/*.dsc /build/pkgbuild/ && \
                       cd /build/pkgbuild && \
                       /usr/lib/pbuilder/pbuilder-satisfydepends && \
-                      dpkg-buildpackage -b -uc -us"
+                      dpkg-buildpackage -b -uc -us -j"
         cwd = '/build'
     else:
         raise exceptions.DbuildBuildFailedException(
